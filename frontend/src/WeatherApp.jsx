@@ -1,10 +1,25 @@
+import axios from "axios";
 import React, { useState, useEffect } from "react";
 
 const WeatherApp = () => {
-  const [city, setCity] = useState("Bhopal");
-  const [stateCode, setStateCode] = useState("Madhya Pradesh");
-  const [countryCode, setCountryCode] = useState("IN");
+  // const [countries, setCountries] = useState([]);
+  // const [states, setStates] = useState([]);
+  // const [cities, setCities] = useState([]);
+  // const [countryCode, setCountryCode] = useState("IN");
+  // const [countryName, setCountryName] = useState("India");
+  // const [stateName, setStateName] = useState("Bihar");
+  // const [cityName, setCityName] = useState("Jamalpur");
+
   const [countries, setCountries] = useState([]);
+  const [states, setStates] = useState([]);
+  const [cities, setCities] = useState([]);
+
+  // Store codes and names separately for better mapping
+  const [countryCode, setCountryCode] = useState("");
+  const [stateCode, setStateCode] = useState(""); // we'll get this from states list
+  const [cityName, setCityName] = useState("");
+
+  //
   const [fields, setFields] = useState({
     name: "",
     country: "",
@@ -23,34 +38,81 @@ const WeatherApp = () => {
     rain1h: 0,
   });
 
-  const API_KEY = import.meta.env.VITE_LOCATION_API_KEY; // Replace with your actual OpenWeatherMap API key
+  const countryStateCity_API_KEY = import.meta.env
+    .VITE_COUNTRYSTATECITY_API_KEY;
 
   const getCountries = async () => {
     try {
-      const headers = new Headers();
-      headers.append("X-CSCAPI-KEY", `${API_KEY}`);
-
-      const requestOptions = {
-        method: "GET",
-        headers: headers,
-        redirect: "follow",
-      };
-
-      const res = await fetch(
-        "https://api.first.org/data/v1/countries",
-        requestOptions
-      );
-
-      console.log(res);
-      
+      const res = await fetch("https://api.countrystatecity.in/v1/countries", {
+        headers: { "X-CSCAPI-KEY": countryStateCity_API_KEY },
+      });
       const data = await res.json();
-      const countryList = Object.entries(data.data).map(([code, value]) => ({
-        code,
-        name: value.country,
-      }));
-      setCountries(countryList);
+      const countriesData = data
+        .map(({ iso2, name }) => ({
+          code: iso2,
+          name,
+          flagURL: `https://flagsapi.com/${iso2}/flat/64.png`,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      setCountries(countriesData);
+
+      // Set default country code if empty
+      if (!countryCode && countriesData.length) {
+        setCountryCode("IN");
+      }
     } catch (error) {
       console.error("Failed to load countries:", error);
+    }
+  };
+
+  // Get states by country code
+  const getStates = async (countryCode) => {
+    try {
+      if (!countryCode) return;
+      const res = await fetch(
+        `https://api.countrystatecity.in/v1/countries/${countryCode}/states`,
+        {
+          headers: { "X-CSCAPI-KEY": countryStateCity_API_KEY },
+        }
+      );
+      const data = await res.json();
+
+      setStates(data);
+
+      // Reset state and city on country change
+      setStateCode("");
+      setCityName("");
+
+      if (!stateCode && data.length && countryCode === "IN") {
+        setStateCode("BR");
+      }
+    } catch (error) {
+      console.error("Failed to load states:", error);
+    }
+  };
+
+  // Get cities by countryCode and stateCode
+  const getCities = async (countryCode, stateCode) => {
+    try {
+      if (!countryCode || !stateCode) return;
+      const res = await fetch(
+        `https://api.countrystatecity.in/v1/countries/${countryCode}/states/${stateCode}/cities`,
+        {
+          headers: { "X-CSCAPI-KEY": countryStateCity_API_KEY },
+        }
+      );
+      const data = await res.json();
+
+      setCities(data);
+
+      // Reset city on state change
+      setCityName("");
+
+      if (!cityName && data.length && stateCode === "BR") {
+        setCityName("Jamalpur");
+      }
+    } catch (error) {
+      console.error("Failed to load cities:", error);
     }
   };
 
@@ -58,18 +120,45 @@ const WeatherApp = () => {
     getCountries();
   }, []);
 
-  const getCoord = async (cityName, state, country) => {
+  useEffect(() => {
+    if (countryCode) {
+      getStates(countryCode);
+    }
+  }, [countryCode]);
+
+  useEffect(() => {
+    if (countryCode && stateCode) {
+      getCities(countryCode, stateCode);
+    }
+  }, [countryCode, stateCode]);
+
+  const toPlusSeparated = (str) => {
+    return str.trim().split(/\s+/).join("+");
+  };
+
+  const getCoord = async (cityName, stateName, countryCode) => {
+    const city = toPlusSeparated(cityName);
+    const state = toPlusSeparated(stateName);
     const res = await fetch(
-      `http://api.openweathermap.org/geo/1.0/direct?q=${cityName},${state},${country}&limit=1&appid=${API_KEY}`
+      `https://api.opencagedata.com/geocode/v1/json?q=${city},+${state},+${countryCode}&key=${
+        import.meta.env.VITE_OPENCAGE_GEO_API_KEY
+      }`
     );
     const data = await res.json();
-    if (data.length === 0) throw new Error("City not found");
-    return { lat: data[0].lat, lon: data[0].lon };
+    if (data.results.length) {
+      const { lat, lng } = data.results[0].geometry;
+      // console.log(lat, lng);
+      return { lat, lon: lng };
+    } else {
+      console.log("No coordinates found");
+    }
   };
 
   const getWeatherData = async ({ lat, lon }) => {
     const res = await fetch(
-      `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${API_KEY}`
+      `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${
+        import.meta.env.VITE_OPENWEATHER_WEATHER_API_KEY
+      }`
     );
     const data = await res.json();
     return {
@@ -93,11 +182,15 @@ const WeatherApp = () => {
 
   const handleSearch = async () => {
     try {
-      const coords = await getCoord(city, stateCode, countryCode);
+      const stateObj = states.find((s) => s.iso2 === stateCode);
+      const stateName = stateObj ? stateObj.name : "";
+
+      const coords = await getCoord(cityName, stateName, countryCode);
       const weatherData = await getWeatherData(coords);
       setFields(weatherData);
     } catch (error) {
-      alert(error.message);
+      console.log(error);
+      // alert(error.message);
     }
   };
 
@@ -118,37 +211,56 @@ const WeatherApp = () => {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-sky-100 to-blue-300 p-4 text-gray-900">
       <div className="mb-4 space-y-2 w-full max-w-md">
-        {/* <input
-          type="text"
-          placeholder="Enter city name"
-          value={city}
-          onChange={(e) => setCity(e.target.value)}
-          className="px-4 py-2 w-full rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-400"
-        /> */}
-        <select
-          value={countryCode}
-          onChange={(e) => setCountryCode(e.target.value)}
-          className="px-4 py-2 w-full rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-400"
-        >
-          <option value="">Select Country</option>
-          {countries.map((country) => (
-            <option key={country.code} value={country.code}>
-              {country.name}
-            </option>
-          ))}
-        </select>
-        <select
-          value={stateCode}
-          onChange={(e) => setStateCode(e.target.value)}
-          className="px-4 py-2 w-full rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-400"
-        >
-          <option value="">Select State</option>
-          <option value="Madhya Pradesh">Madhya Pradesh</option>
-          <option value="CA">California</option>
-          <option value="NY">New York</option>
-          <option value="TX">Texas</option>
-        </select>
-        
+        <div className="flex gap-3 items-center">
+          <select
+            value={countryCode}
+            onChange={(e) => setCountryCode(e.target.value)}
+            className="px-4 py-2 w-full rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-400"
+          >
+            <option value="">Select Country</option>
+            {countries.map(({ code, name }) => (
+              <option key={code} value={code}>
+                {name}
+              </option>
+            ))}
+          </select>
+          {countryCode && (
+            <img
+              src={countries.find((c) => c.code === countryCode)?.flagURL}
+              alt="Country flag"
+              className="h-10 object-cover rounded"
+            />
+          )}
+        </div>
+        <div className="flex gap-3">
+          <select
+            value={stateCode}
+            onChange={(e) => setStateCode(e.target.value)}
+            disabled={!states.length}
+            className="px-4 py-2 w-full rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-400"
+          >
+            <option value="">Select State</option>
+            {states.map(({ iso2, name }) => (
+              <option key={iso2} value={iso2}>
+                {name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={cityName}
+            onChange={(e) => setCityName(e.target.value)}
+            disabled={!cities.length}
+            className="px-4 py-2 w-full rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-400"
+          >
+            <option value="">Select City</option>
+            {cities.map(({ name }) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <button
           onClick={handleSearch}
           className="w-full mt-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
